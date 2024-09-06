@@ -1,0 +1,382 @@
+#MAP
+# Load necessary libraries
+library(readxl)
+library(ggplot2)
+library(ggmap)
+library(grid)
+library(gridExtra)
+library(png)
+
+# Load the data from Excel
+data <- read_excel("C:/Users/Annie/OneDrive/Desktop/master thesis/Sampling/WF_coordinates_May2023.xlsx")
+
+# Prepare the data
+
+data$color <- ifelse(grepl("Windfarm", data$Site), "Windfarm", 
+                     ifelse(grepl("Shearwater|Inner_Buchon|Outer_Buchon", data$Site), "Shore", NA))
+
+# Register Google Maps API key (if needed)
+register_google(key = "AIzaSyCKoNv56VUduqlKE_cD4LEJVJO8SanAH34")
+
+# Define the base map location and zoom level
+map_location <- c(lon= -121.0, lat=35.0)
+map <- get_map(location = map_location, zoom = 9, maptype = "terrain")
+
+# Plot the map with custom shapes and colors
+map_plot <- ggmap(map) +
+  geom_point(data = data, aes(x = Long, y = Lat,color = color), size = 1.5) +
+  scale_color_manual(values = c("Offshore" = "blue", "Shore" = "red")) +
+  theme_minimal() 
+
+print(map_plot)
+
+
+#Riaz analaysis 
+setwd("C:/Users/Annie/OneDrive/Desktop/master thesis/riaz")
+library("reshape2")
+library("ggplot2")
+library("openxlsx")
+library("VennDiagram")
+
+Riaz_wf <- read.csv("motu_all_Riaz_wf_noContam.csv", header = TRUE, stringsAsFactors = FALSE)
+
+Riaz_wf <- Riaz_wf[-which(Riaz_wf$pid < 0.9),]
+Riaz_wf_abund <- Riaz_wf[,c(19:73)]
+
+for (i in 1:ncol(Riaz_wf_abund)) {
+  Riaz_wf_abund[which(Riaz_wf_abund[,i] <= 1),i] <- 0
+}
+
+Riaz_wf_abund <- Riaz_wf_abund[,-which(apply(Riaz_wf_abund,2,sum) <= 1000)]
+
+Riaz_wf <- data.frame(Riaz_wf[1:18], Riaz_wf_abund)
+
+Riaz_wf_data <- Riaz_wf[,c(2,19:39)]
+Riaz_wf_data <- aggregate(data = Riaz_wf_data, .~ final_name, FUN = mean)
+
+Riaz_wf_data$tot_count <- apply(Riaz_wf_data[,-1],1,sum)
+Riaz_wf_data <- Riaz_wf_data[-which(Riaz_wf_data$tot_count == 0),]
+
+### Data manipulation
+Riaz_wf_sp <- as.data.frame(t(Riaz_wf_data[,-23]))
+colnames(Riaz_wf_sp) <- Riaz_wf_sp[1,]
+Riaz_wf_sp <- Riaz_wf_sp[-1,]
+Riaz_wf_sp$Site <- rownames(Riaz_wf_sp)
+rownames(Riaz_wf_sp) <- NULL
+for (i in 1:nrow(Riaz_wf_sp)) {
+  Riaz_wf_sp[i,-19] <- as.integer(Riaz_wf_sp[i,-19])
+}
+
+
+Riaz_wf_heat = melt(Riaz_wf_sp, id = c("Site"))
+Riaz_wf_heat$value <- as.numeric(Riaz_wf_heat$value)
+Riaz_wf_heat$value <- sqrt(Riaz_wf_heat$value)
+colnames(Riaz_wf_heat) <- c("Site","Species", "reads")
+
+Riaz_wf_heat$Site = factor(Riaz_wf_heat$Site, levels = unique(Riaz_wf_heat$Site))
+Riaz_wf_heat = Riaz_wf_heat[order(Riaz_wf_heat$Site),]
+
+##HeatMap
+#12S
+HeatMap_wf = ggplot(Riaz_wf_heat, aes(Site, 
+                                      ordered(Species, 
+                                              levels=sort(unique(Species), decreasing = T)))) + 
+  geom_tile(aes(fill = reads), colour = "white") + 
+  scale_fill_gradient(expression(sqrt("Nr. of reads", 2)), low = "white", high = "darkblue") +
+  theme(axis.text.y = element_text(face = "italic", size = 8),
+        axis.text.x = element_text(size = 8, face = "bold", angle = 90, hjust = 1),
+        legend.position = "right",
+        legend.title=element_text(size = 10),
+        panel.background = element_blank()) + 
+  scale_x_discrete(position = "bottom") +
+  ylab("") + xlab("") 
+HeatMap_wf
+
+##ggsave(filename="HeatMap_wf.tiff", plot = HeatMap_wf, device = "tiff",
+#width = 30, height = 18, units = "cm", dpi = 300)
+
+
+#### Venndiagram
+
+elasmo <- read.xlsx("elasmo_wf_allSpecies.xlsx", colNames = FALSE)
+riaz <- read.xlsx("C:/Users/Annie/OneDrive/Desktop/master thesis/Riaz/riaz_wf_allSpecies.xlsx", colNames = FALSE)
+
+grid.newpage()
+Venn_elasmo_riaz <- draw.pairwise.venn(area1 = length(elasmo$X1), 
+                                       area2 = length(riaz$X1), 
+                                       cross.area = length(intersect(elasmo$X1, riaz$X1)), 
+                                       category = c("Elasmo", "Riaz"),
+                                       col=c("forestgreen", "blue"), lwd=4, font.face=rep("bold",7),
+                                       fill = c(alpha("forestgreen",0.3), alpha("blue",0.3)),
+                                       fontfamily = rep("Arial", 3), cat.fontfamily = "Arial")
+
+#ggsave(Venn_elasmo_riaz, width = 20, height = 15, units = "cm", dpi = 300, 
+#      file= "Venn_riaz_elasmo.pdf", device = "pdf")
+
+OnlyElasmo = setdiff(unique(elasmo$X1), intersect(riaz$X1, elasmo$X1))
+OnlyRiaz = setdiff(unique(riaz$X1), intersect(elasmo$X1, riaz$X1))
+Elasmo_Riaz = intersect(elasmo$X1, riaz$X1)
+
+for (i in 1:nrow(elasmo)) {
+  elasmo$genus[i] <- strsplit(elasmo$X1[i], " ")[[1]][1]
+}
+
+for (i in 1:nrow(riaz)) {
+  riaz$genus[i] <- strsplit(riaz$X1[i], " ")[[1]][1]
+}
+
+grid.newpage()
+Venn_elasmo_riaz_genus <- draw.pairwise.venn(area1 = length(elasmo$genus), 
+                                             area2 = length(riaz$genus), 
+                                             cross.area = length(intersect(elasmo$genus, riaz$genus)), 
+                                             category = c("Elasmo", "Riaz"),
+                                             col=c("forestgreen", "blue"), lwd=4, font.face=rep("bold",7),
+                                             fill = c(alpha("forestgreen",0.3), alpha("blue",0.3)),
+                                             fontfamily = rep("Arial", 3), cat.fontfamily = "Arial")
+
+
+#ggsave(Venn_elasmo_riaz_genus, width = 20, height = 15, units = "cm", dpi = 300, 
+#     file= "Venn_riaz_elasmo_genus.tiff", device = "tiff")
+
+
+#elasmo anaysis 
+setwd("C:/Users/Annie/OneDrive/Desktop/master thesis/elasmo")
+library("reshape2")
+library("ggplot2")
+elasmo_wf <- read.csv("motu_all_elasmo_wf_noContam.csv", header = TRUE, stringsAsFactors = FALSE)
+
+#elasmo_wf <- elasmo_wf[-which(elasmo_wf$pid < 0.9),]
+elasmo_wf_abund <- elasmo_wf[,c(19:78)]
+
+for (i in 1:ncol(elasmo_wf_abund)) {
+  elasmo_wf_abund[which(elasmo_wf_abund[,i] <= 1),i] <- 0
+}
+
+elasmo_wf_abund <- elasmo_wf_abund[,-which(apply(elasmo_wf_abund,2,sum) <= 100)]
+
+elasmo_wf <- data.frame(elasmo_wf[1:18], elasmo_wf_abund)
+
+elasmo_wf_data <- elasmo_wf[,c(2,19:36)]
+elasmo_wf_data <- aggregate(data = elasmo_wf_data, .~ final_name, FUN = mean)
+
+elasmo_wf_data$tot_count <- apply(elasmo_wf_data[,-1],1,sum)
+#elasmo_wf_data <- elasmo_wf_data[-which(elasmo_wf_data$tot_count == 0),]
+
+### Data manipulation
+elasmo_wf_sp <- as.data.frame(t(elasmo_wf_data[,-20]))
+colnames(elasmo_wf_sp) <- elasmo_wf_sp[1,]
+elasmo_wf_sp <- elasmo_wf_sp[-1,]
+elasmo_wf_sp$Site <- rownames(elasmo_wf_sp)
+rownames(elasmo_wf_sp) <- NULL
+for (i in 1:nrow(elasmo_wf_sp)) {
+  elasmo_wf_sp[i,-17] <- as.integer(elasmo_wf_sp[i,-17])
+}
+
+
+elasmo_wf_heat = melt(elasmo_wf_sp, id = c("Site"))
+elasmo_wf_heat$value <- as.numeric(elasmo_wf_heat$value)
+elasmo_wf_heat$value <- sqrt(elasmo_wf_heat$value)
+colnames(elasmo_wf_heat) <- c("Site","Species", "reads")
+
+elasmo_wf_heat$Site = factor(elasmo_wf_heat$Site, levels = unique(elasmo_wf_heat$Site))
+elasmo_wf_heat = elasmo_wf_heat[order(elasmo_wf_heat$Site),]
+
+##HeatMap
+#12S
+HeatMap_wf = ggplot(elasmo_wf_heat, aes(Site, 
+                                        ordered(Species, 
+                                                levels=sort(unique(Species), decreasing = T)))) + 
+  geom_tile(aes(fill = reads), colour = "white") + 
+  scale_fill_gradient(expression(sqrt("Nr. of reads", 2)), low = "white", high = "darkgreen") +
+  theme(axis.text.y = element_text(face = "italic", size = 8),
+        axis.text.x = element_text(size = 8, face = "bold", angle = 90, hjust = 1),
+        legend.position = "right",
+        legend.title=element_text(size = 10),
+        panel.background = element_blank()) + 
+  scale_x_discrete(position = "bottom") +
+  ylab("") + xlab("") 
+HeatMap_wf
+
+ggsave(filename="HeatMap_elasmo_wf.tiff", plot = HeatMap_wf, device = "tiff",
+       width = 30, height = 18, units = "cm", dpi = 300)
+
+#riaz mds
+#mds plot  
+# Load required libraries
+library("dplyr")
+library("reshape2")
+library("ggplot2")
+library("ggrepel")
+library("vegan")  # For metaMDS and distance matrix functions
+setwd("C:/Users/Annie/OneDrive/Desktop/master thesis")
+
+Riaz_wf <- read.csv("C:/Users/Annie/OneDrive/Desktop/master thesis/Riaz/motu_all_Riaz_wf_noContam.csv", header = TRUE, stringsAsFactors = FALSE)
+
+Riaz_wf <- Riaz_wf[-which(Riaz_wf$pid < 0.9),]
+Riaz_wf_abund <- Riaz_wf[,c(19:73)]
+
+for (i in 1:ncol(Riaz_wf_abund)) {
+  Riaz_wf_abund[which(Riaz_wf_abund[,i] <= 1),i] <- 0
+}
+
+Riaz_wf_abund <- Riaz_wf_abund[,-which(apply(Riaz_wf_abund,2,sum) <= 1000)]
+
+Riaz_wf <- data.frame(Riaz_wf[1:18], Riaz_wf_abund)
+
+Riaz_wf_data <- Riaz_wf[,c(2,19:39)]
+
+### aggregate species by scientific name ###
+Riaz_wf_data <- aggregate(data = Riaz_wf_data, .~ final_name, FUN = mean)
+
+Riaz_wf_data$tot_count <- apply(Riaz_wf_data[,-1],1,sum)
+Riaz_wf_data <- Riaz_wf_data[-which(Riaz_wf_data$tot_count == 0),]
+
+### Data manipulation
+Riaz_wf_sp <- as.data.frame(t(Riaz_wf_data[,-23]))
+colnames(Riaz_wf_sp) <- Riaz_wf_sp[1,]
+Riaz_wf_sp <- Riaz_wf_sp[-1,]
+Riaz_wf_sp$Site <- rownames(Riaz_wf_sp)
+rownames(Riaz_wf_sp) <- NULL
+for (i in 1:nrow(Riaz_wf_sp)) {
+  Riaz_wf_sp[i,-19] <- as.integer(Riaz_wf_sp[i,-19])
+}
+
+
+Riaz_wf_long = melt(Riaz_wf_sp, id = c("Site"))
+Riaz_wf_long$value <- as.numeric(Riaz_wf_long$value)
+Riaz_wf_long$value <- sqrt(Riaz_wf_long$value)
+colnames(Riaz_wf_long) <- c("Site","Species", "reads")
+
+Riaz_wf_nMDS <- dcast(Riaz_wf_long, Site  ~ Species, value.var = "reads", fun.aggregate = sum)
+
+# Prepare data for MDS
+species_abundance <- Riaz_wf_nMDS[,c(2:ncol(Riaz_wf_nMDS))]
+site_labels <- Riaz_wf_nMDS$Site
+# Calculate the distance matrix
+dist_matrix <- vegdist(species_abundance, method = "bray")
+# Perform MDS
+mds_result <- metaMDS(dist_matrix, k = 2)  # k = 2 for 2-dimensional MDS
+# Create a data frame for plotting
+mds_data <- data.frame(MDS1 = mds_result$points[, 1], MDS2 = mds_result$points[, 2], Site = site_labels)
+values <- c("Shore", "Windfarm")
+repetitions <- c(7, 14)
+mds_data$Location <- rep(values, repetitions)
+
+# Plot MDS results
+mds_plot <- ggplot(mds_data, aes(x = MDS1, y = MDS2, fill = Location)) +
+  geom_point(aes(x=MDS1, y=MDS2, colour = Location), size = 3) +
+  scale_colour_manual(values = c("red","blue")) +
+  geom_text_repel(data = mds_data, aes(x=MDS1, y=MDS2, label=Site), size = 3, force = 10,
+                  fontface = "bold", inherit.aes = F, max.overlaps = 20) + 
+  labs(title = "MDS Plot of Species Abundance Across Sites", x = "MDS Dimension 1", y = "MDS Dimension 2") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  annotate("text", x = 1.0, y = -1.0, size = 4, fontface = "bold",
+           label = paste0("Stress: ",round(mds_result$stress,2)))
+print(mds_plot)
+ggsave(filename="MDS_Plot_Riaz.png", plot = mds_plot, width = 10, height = 8, units = "in", dpi = 300)
+
+#premnova 
+install.packages("vegan")
+library(vegan)
+# Assuming dist_matrix and mds_data are already created as in the MDS plot section
+# Convert distance matrix to a suitable format for adonis2
+dist_matrix <- dist(Riaz_wf_nMDS[,-1])  # Exclude the Site column
+# Create a grouping factor
+grouping_factor <- mds_data$Location
+# Perform PERMANOVA test
+permanova_result <- adonis2(dist_matrix ~ grouping_factor, data = mds_data, permutations = 999)
+# Print the results
+print(permanova_result)
+
+}
+
+#elasmo mds
+#mds plot 
+# Load required libraries
+library("dplyr")
+library("reshape2")
+library("ggplot2")
+library("ggrepel")
+library("vegan")  # For metaMDS and distance matrix functions
+setwd("C:/Users/Annie/OneDrive/Desktop/master thesis")
+
+Elasmo_wf <- read.csv("C:/Users/Annie/OneDrive/Desktop/master thesis/Elasmo/motu_all_elasmo_wf_noContam.csv", header = TRUE, stringsAsFactors = FALSE)
+
+#Elasmo_wf <- Elasmo_wf[-which(Elasmo_wf$pid < 0.9),]
+Elasmo_wf_abund <- Elasmo_wf[,c(19:78)]
+
+for (i in 1:ncol(Elasmo_wf_abund)) {
+  Elasmo_wf_abund[which(Elasmo_wf_abund[,i] <= 1),i] <- 0
+}
+
+Elasmo_wf_abund <- Elasmo_wf_abund[,-which(apply(Elasmo_wf_abund,2,sum) <= 100)]
+
+Elasmo_wf <- data.frame(Elasmo_wf[1:18], Elasmo_wf_abund)
+
+Elasmo_wf_data <- Elasmo_wf[,c(2,19:36)]
+
+### aggregate species by scientific name ###
+Elasmo_wf_data <- aggregate(data = Elasmo_wf_data, .~ final_name, FUN = mean)
+
+Elasmo_wf_data$tot_count <- apply(Elasmo_wf_data[,-1],1,sum)
+#Elasmo_wf_data <- Elasmo_wf_data[-which(Elasmo_wf_data$tot_count == 0),]
+
+### Data manipulation
+Elasmo_wf_sp <- as.data.frame(t(Elasmo_wf_data[,-20]))
+colnames(Elasmo_wf_sp) <- Elasmo_wf_sp[1,]
+Elasmo_wf_sp <- Elasmo_wf_sp[-1,]
+Elasmo_wf_sp$Site <- rownames(Elasmo_wf_sp)
+rownames(Elasmo_wf_sp) <- NULL
+for (i in 1:nrow(Elasmo_wf_sp)) {
+  Elasmo_wf_sp[i,-17] <- as.integer(Elasmo_wf_sp[i,-17])
+}
+
+
+Elasmo_wf_long = melt(Elasmo_wf_sp, id = c("Site"))
+Elasmo_wf_long$value <- as.numeric(Elasmo_wf_long$value)
+Elasmo_wf_long$value <- sqrt(Elasmo_wf_long$value)
+colnames(Elasmo_wf_long) <- c("Site","Species", "reads")
+
+Elasmo_wf_nMDS <- dcast(Elasmo_wf_long, Site  ~ Species, value.var = "reads", fun.aggregate = sum)
+
+# Prepare data for MDS
+species_abundanceE <- Elasmo_wf_nMDS[,c(2:ncol(Elasmo_wf_nMDS))]
+site_labelsE <- Elasmo_wf_nMDS$Site
+# Calculate the distance matrix
+dist_matrixE <- vegdist(species_abundanceE, method = "bray")
+# Perform MDS
+mds_resultE <- metaMDS(dist_matrixE, k = 2)  # k = 2 for 2-dimensional MDS
+# Create a data frame for plotting
+mds_dataE <- data.frame(MDS1 = mds_resultE$points[, 1], MDS2 = mds_resultE$points[, 2], Site = site_labelsE)
+valuesE <- c("Shore", "Windfarm")
+repetitionsE <- c(5, 13)
+mds_dataE$Location <- rep(valuesE, repetitionsE)
+mds_dataE <- mds_dataE[-c(13),]
+# Plot MDS results
+mds_plotE <- ggplot(mds_dataE, aes(x = MDS1, y = MDS2, fill = Location)) +
+  geom_point(aes(x=MDS1, y=MDS2, colour = Location), size = 3) +
+  scale_colour_manual(values = c("red","blue")) +
+  geom_text_repel(data = mds_dataE, aes(x=MDS1, y=MDS2, label=Site), size = 3, force = 10,
+                  fontface = "bold", inherit.aes = F, max.overlaps = 20) + 
+  labs(title = "MDS Plot of Species Abundance Across Sites", x = "MDS Dimension 1", y = "MDS Dimension 2") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+print(mds_plotE)
+
+ggsave(filename="MDS_Plot_elas.png", plot = mds_plotE, width = 10, height = 8, units = "in", dpi = 300)
+
+#premnova 
+install.packages("vegan")
+library(vegan)
+# Assuming dist_matrix and mds_data are already created as in the MDS plot section
+# Convert distance matrix to a suitable format for adonis2
+dist_matrixe <- dist(Elasmo_wf_nMDS[,-1])  # Exclude the Site column
+# Create a grouping factor
+grouping_factore <- mds_dataE$Location
+# Perform PERMANOVA test
+permanova_resulte <- adonis2(dist_matrixe ~ grouping_factore, data = mds_dataE, permutations = 999)
+# Print the results
+print(permanova_resulte)
+dist_matrixE
+mds_dataE$Location
