@@ -1,0 +1,28 @@
+mkdir -p 0-metadata 1-scripts 2-raw 3-fastqc 4-demux 5-filter 6-quality 7-refdb 8-final ### create al the folder we need for our analysis
+gzip -dk 2-raw/*fastq.gz  ### unzip raw .fastq files keeping the input compressed file
+fastqc 2-raw/*.fastq -o 3-fastqc/ -t 8  ### quality check of raw sequences using fastqc
+vsearch --fastq_mergepairs 2-raw/Lib01_S1_L001_R1_001.fastq --reverse 2-raw/Lib01_S1_L001_R2_001.fastq --fastqout 2-raw/WF_Riaz_merged.fastq ###merge forward and reverse
+cutadapt 2-raw/WF_Riaz_merged.fastq -g file:'ngsfilter_riaz_wf_cutadapt.fasta' --discard-untrimmed -o 4-demux/{name}.fastq --no-indels -e 1 --cores=0 --revcomp ###demultiplex sequences
+###combine all the demultiplex files
+cd 4-demux/
+for fq in *.fastq
+do
+  echo "Merging reads for: ${fq/.fastq/}"
+  vsearch --fastq_filter ${fq} --fastq_maxee 1.0 --fastq_maxlen 229 --fastq_minlen 109	 --fastq_maxns 0 --fastqout ../5-filter/${fq/.fastq/_filtered.fastq} --fastaout ../5-filter/${fq/.fastq/_filtered.fasta} --relabel ${fq/_trimmed.fastq/}.
+done
+cat 5-filter/*.fasta > 6-quality/Riaz_wf_combined.fasta
+vsearch --derep_fulllength 6-quality/Riaz_wf_combined.fasta --sizeout --relabel uniq. --output 6-quality/Riaz_wf_uniques.fasta ###dereplicate sequences
+swarm=~/applications/swarm/bin/swarm
+$swarm -d 3 -z -t 2 -o 6-quality/Riaz_wf_swarm3_out -s 6-quality/Riaz_wf_swarm3_stats -w 6-quality/Riaz_wf_swarm3_seeds.fasta 6-quality/Riaz_wf_uniques.fasta
+vsearch --uchime_denovo 6-quality/Riaz_wf_swarm3_seeds.fasta --sizeout --minh 0.90 --nonchimeras 8-final/Riaz_wf_zotus.fasta --relabel zotu. --chimeras 6-quality/Riaz_wf_chim.fasta --uchimeout 6-quality/Riaz_wf_uchimeout.txt   ###remove chimeras
+
+vsearch --usearch_global 6-quality/Riaz_wf_combined.fasta --db 8-final/Riaz_wf_zotus.fasta --strand plus --id 0.97 --otutabout 8-final/Riaz_wf_zotutable.txt
+### 4.2 Sintax
+# generate reference databases for sintax using CRABS
+vsearch --threads "$THREADS" --sintax 8-final/Riaz_wf_zotus.fasta --db 7-refdb/12S_vertebratedb_Riaz_sintax.fasta --sintax_cutoff 0.7 --tabbedout 8-final/Riaz_wf_sintax.tsv
+### 4.3 blastn
+makeblastdb -in 7-refdb/12S_vertebratedb_Riaz_sintax.fasta -dbtype nucl -blastdb_version 5
+blastn -task blastn -num_threads 1 -evalue 0.05 -word_size 7 -max_target_seqs 10 -db 7-refdb/12S_vertebratedb_Riaz_sintax.fasta -outfmt "6 qseqid sseqid evalue length pident nident score bitscore" -out 8-final/Riaz_wf_blast-v3.out -query 8-final/Riaz_wf_zotus.fasta
+echo -e 'id\tblastDbid\tblastEvalue\tblastLength\tblastPident\tblastNident\tblastScore\tblastBitscore' | sed -e "s/-e //g" > 8-final/headers
+cat 8-final/headers 8-final/Riaz_wf_blast-v3.out > 8-final/Riaz_wf_blast-v3.tsv
+
